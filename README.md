@@ -5,7 +5,7 @@ Python library for - exclusively crypto up-down - market data collection
 
 ### Installation 
 ```
-git clone 
+git clone https://github.com/julumust/predmkt_db.git
 ```
 
 ### Quickstart
