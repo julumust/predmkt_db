@@ -41,7 +41,7 @@ class WebSocketHandler():
         self.current_ids = retrieve_ID.get_assetID()
         self.wsapp = websocket.WebSocketApp("wss://ws-subscriptions-clob.polymarket.com/ws/market", on_open=self.on_open, on_message=self.on_message)
 
-    def schedule_rotation(self): # Updates initial subscription message to new market clobTokenID
+    def subscription_update(self): # Updates initial subscription message to new market clobTokenID
         while True:
             now = time.time()
             next_boundary = (int(now // 300) + 1) * 300
@@ -83,3 +83,4 @@ if __name__ == "__main__":
     retrieve_ID = GetCryptoID(["btc"])
     handler = WebSocketHandler(retrieve_ID)
     handler.start()
+
