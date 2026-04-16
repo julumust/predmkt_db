@@ -1,5 +1,4 @@
-# Database Library 
-Python library for - exclusively crypto up-down - market data collection
+# Documentation Reference
 
 ## Documentation
 
