@@ -37,20 +37,24 @@ class GetCryptoID():
             self.token.extend(parsed_ids)
         return self.token
 
+class OrderBook():
+    DB_TABLE = "book" # Name of the hypertable
+    DB_COLUMNS = ["time","asset_id","market","side","price","quantity"] # Columns in the hypertable in the correct order
+    MAX_BATCH_SIZE = 100 # Batch side used to insert data in batches
+
+class PriceChange():
+    DB_TABLE = "price_change"
+    DB_COLUMNS = ["time","asset_id","market","price","quantity","side", "best_bid", "best_ask"]
+    MAX_BATCH_SIZE = 1000
+
 class WebSocketHandler():
-
-    # Name of the hypertable
-    DB_TABLE = "poly_ticks"
-    # Columns in the hypertable in the correct order
-    DB_COLUMNS = ["time","asset_id","market","side","price","quantity"]
-    # Batch side used to insert data in batches
-    MAX_BATCH_SIZE = 100
-
+    
     def __init__(self, retrieve_ID, conn):
         self.retrieve_ID = retrieve_ID
         self.current_ids = retrieve_ID.get_assetID()
         self.conn = conn
-        self.current_batch = []
+        self.book_batch = []
+        self.delta_batch = []
         self.insert_counter = 0
         self.wsapp = websocket.WebSocketApp("wss://ws-subscriptions-clob.polymarket.com/ws/market", on_open=self.on_open, on_message=self.on_message)
 
@@ -69,13 +73,11 @@ class WebSocketHandler():
             except Exception as e:
                 print("Rotation error:", e)
 
-    def insert_values(self, data):
+    def insert_values(self, data, table, columns):
         if self.conn is not None:
             try:
                 cursor = self.conn.cursor()
-                sql = f"""
-                INSERT INTO {self.DB_TABLE} ({','.join(self.DB_COLUMNS)})
-                VALUES %s;"""
+                sql = f"INSERT INTO {table} ({','.join(columns)}) VALUES %s;"
                 execute_values(cursor, sql, data)
                 self.conn.commit()
                 print("Insert successful")
@@ -105,24 +107,35 @@ class WebSocketHandler():
             timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz = timezone.utc)
             rows = []
             for bid in message["bids"]:
-                rows.append((timestamp, message["asset_id"], message["market"], "side", float(bid["price"]), float(bid["size"])))
+                rows.append((timestamp, message["asset_id"], message["market"], "bid", float(bid["price"]), float(bid["size"])))
             for ask in message["asks"]:
-                rows.append((timestamp, message["asset_id"], message["market"], "side", float(ask["price"]), float(ask["size"])))
-            self.current_batch.extend(rows)
-            print(f"Current batch size: {len(self.current_batch)}")
+                rows.append((timestamp, message["asset_id"], message["market"], "ask", float(ask["price"]), float(ask["size"])))
+            self.book_batch.extend(rows)
+            print(f"Current batch size: {len(self.book_batch)}")
 
             # Ingest data if max batch size is reached then reset the batch
-            if len(self.current_batch) >= self.MAX_BATCH_SIZE:
-                print("triggering insert...")  
-                self.insert_values(self.current_batch)
+            if len(self.book_batch) >= OrderBook.MAX_BATCH_SIZE:
+                self.insert_values(self.book_batch, OrderBook.DB_TABLE, OrderBook.DB_COLUMNS)
                 self.insert_counter += 1
                 print(f"Batch insert #{self.insert_counter}")
-                self.current_batch = []        
+                self.book_batch = []
+
+        elif message["event_type"] == "price_change":
+            timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz=timezone.utc)
+            rows = []
+            for change in message["price_changes"]:
+                rows.append((timestamp, change["asset_id"], message["market"], float(change["price"]), float(change["size"]), change["side"], float(change["best_bid"]), float(change["best_ask"])))
+            self.delta_batch.extend(rows)
+            print(f"Delta batch size: {len(self.delta_batch)}")
+
+            if len(self.delta_batch) >= PriceChange.MAX_BATCH_SIZE:
+                self.insert_values(self.delta_batch, PriceChange.DB_TABLE, PriceChange.DB_COLUMNS)
+                self.insert_counter += 1
+                print(f"Batch insert #{self.insert_counter}")
+                self.delta_batch = []
 
     def start(self):
         self.wsapp.run_forever()
-
-
 
 if __name__ == "__main__":
     conn = psycopg2.connect(database="polymarket",
