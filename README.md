@@ -2,10 +2,15 @@
 
 ## Documentation
 
+Recents changes include timescaledb integration. Current functionality permits parsing orderbook snapshots from Polymarket's websocket channel. Further development will include other ```event_type(s)```.
+
 ### Installation 
 ```
 git clone https://github.com/julumust/predmkt_db.git
 ```
+### Dependecies
+- **Python 3.9+**
+- **Docker**
 
 ### Quickstart
 
@@ -73,7 +78,6 @@ def schedule_rotation(self): # Updates initial subscription message to new marke
       print("Rotation error:", e)
 ```
 
-
 ## Kalshi Websocket Library
 
-Work in progress...
+Coming soon.
