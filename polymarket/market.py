@@ -47,6 +47,31 @@ class PriceChange():
     DB_COLUMNS = ["time","asset_id","market","price","quantity","side", "best_bid", "best_ask"]
     MAX_BATCH_SIZE = 1000
 
+class LastTradePrice():
+    DB_TABLE = "last_tp"
+    DB_COLUMNS = ["time","asset_id","market","price","quantity","side"]
+    MAX_BATCH_SIZE = 100
+
+class TickSizeChange():
+    DB_TABLE = "ts_delta"
+    DB_COLUMNS = ["time","asset_id","market","old_ts", "new_ts"]
+    MAX_BATCH_SIZE = 100   
+
+class BestBidAsk():
+    DB_TABLE = "best_bid_ask"
+    DB_COLUMNS = ["time","asset_id","market","best_bid","best_ask","spread"]
+    MAX_BATCH_SIZE = 100
+
+class NewMarket():
+    DB_TABLE = "new_market"
+    DB_COLUMNS = ["time","question","market","slug"]
+    MAX_BATCH_SIZE = 10
+
+class MarketResolved():
+    DB_TABLE = "market_resolved"
+    DB_COLUMNS = ["time","id","market","asset_ids","winning_asset_id","win_outcome"]
+    MAX_BATCH_SIZE = 10 
+
 class WebSocketHandler():
     
     def __init__(self, retrieve_ID, conn):
@@ -55,7 +80,11 @@ class WebSocketHandler():
         self.conn = conn
         self.book_batch = []
         self.delta_batch = []
-        self.insert_counter = 0
+        self.last_trade_price = []
+        self.tick_delta = []
+        self.bidask = []
+        self.new_market = []
+        self.market_resolved = []
         self.wsapp = websocket.WebSocketApp("wss://ws-subscriptions-clob.polymarket.com/ws/market", on_open=self.on_open, on_message=self.on_message)
 
     def schedule_rotation(self): # Updates initial subscription message to new market clobTokenID
@@ -111,29 +140,96 @@ class WebSocketHandler():
             for ask in message["asks"]:
                 rows.append((timestamp, message["asset_id"], message["market"], "ask", float(ask["price"]), float(ask["size"])))
             self.book_batch.extend(rows)
-            print(f"Current batch size: {len(self.book_batch)}")
 
-            # Ingest data if max batch size is reached then reset the batch
+
             if len(self.book_batch) >= OrderBook.MAX_BATCH_SIZE:
                 self.insert_values(self.book_batch, OrderBook.DB_TABLE, OrderBook.DB_COLUMNS)
-                self.insert_counter += 1
-                print(f"Batch insert #{self.insert_counter}")
                 self.book_batch = []
 
         elif message["event_type"] == "price_change":
             timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz=timezone.utc)
             rows = []
+
             for change in message["price_changes"]:
                 rows.append((timestamp, change["asset_id"], message["market"], float(change["price"]), float(change["size"]), change["side"], float(change["best_bid"]), float(change["best_ask"])))
             self.delta_batch.extend(rows)
-            print(f"Delta batch size: {len(self.delta_batch)}")
 
             if len(self.delta_batch) >= PriceChange.MAX_BATCH_SIZE:
                 self.insert_values(self.delta_batch, PriceChange.DB_TABLE, PriceChange.DB_COLUMNS)
-                self.insert_counter += 1
-                print(f"Batch insert #{self.insert_counter}")
                 self.delta_batch = []
 
+        elif message["event_type"] == "last_trade_price":
+            timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz=timezone.utc)
+            self.last_trade_price.append((
+                timestamp,
+                message["asset_id"],
+                message["market"],
+                float(message["price"]),
+                float(message["size"]),
+                message["side"]
+                ))
+                
+            if len(self.last_trade_price) >= LastTradePrice.MAX_BATCH_SIZE:
+                self.insert_values(self.last_trade_price, LastTradePrice.DB_TABLE, LastTradePrice.DB_COLUMNS)
+                self.last_trade_price = []
+
+        elif message["event_type"] == "tick_size_change":
+            timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz=timezone.utc)
+            self.tick_delta.append((
+                timestamp,
+                message["asset_id"],
+                message["market"],
+                float(message["old_tick_size"]),
+                float(message["new_tick_size"])
+                ))
+                
+            if len(self.tick_delta) >= TickSizeChange.MAX_BATCH_SIZE:
+                self.insert_values(self.tick_delta, TickSizeChange.DB_TABLE, TickSizeChange.DB_COLUMNS)
+                self.tick_delta = []
+
+        elif message["event_type"] == "best_bid_ask":
+            timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz=timezone.utc)
+            self.bidask.append((
+                timestamp,
+                message["asset_id"],
+                message["market"],
+                float(message["best_bid"]),
+                float(message["best_ask"]),
+                float(message["spread"])
+                ))
+            
+            if len(self.bidask) >= BestBidAsk.MAX_BATCH_SIZE:
+                self.insert_values(self.bidask, BestBidAsk.DB_TABLE, BestBidAsk.DB_COLUMNS)
+                self.bidask = []
+
+        elif message["event_type"] == "new_market":
+            timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz=timezone.utc)
+            self.new_market.append((
+                timestamp,
+                message["question"],
+                message["market"],
+                message["slug"]
+                ))
+                
+            if len(self.new_market) >= NewMarket.MAX_BATCH_SIZE:
+                self.insert_values(self.new_market, NewMarket.DB_TABLE, NewMarket.DB_COLUMNS)
+                self.new_market = []
+
+        elif message["event_type"] == "market_resolved":
+            timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz=timezone.utc)
+            self.market_resolved.append((
+                timestamp,
+            message["id"],
+            message["market"],
+            message["assets_ids"],      # this is a list — store as array/json in your DB
+            message["winning_asset_id"],
+            message["winning_outcome"]
+            ))
+
+            if len(self.market_resolved) >= MarketResolved.MAX_BATCH_SIZE:
+                self.insert_values(self.market_resolved, MarketResolved.DB_TABLE, MarketResolved.DB_COLUMNS)
+                self.market_resolved = []
+    
     def start(self):
         self.wsapp.run_forever()
 
