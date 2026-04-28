@@ -45,7 +45,7 @@ class OrderBook():
 class PriceChange():
     DB_TABLE = "price_change"
     DB_COLUMNS = ["time","asset_id","market","price","quantity","side", "best_bid", "best_ask"]
-    MAX_BATCH_SIZE = 1000
+    MAX_BATCH_SIZE = 100
 
 class LastTradePrice():
     DB_TABLE = "last_tp"
@@ -65,12 +65,12 @@ class BestBidAsk():
 class NewMarket():
     DB_TABLE = "new_market"
     DB_COLUMNS = ["time","question","market","slug"]
-    MAX_BATCH_SIZE = 10
+    MAX_BATCH_SIZE = 100
 
 class MarketResolved():
     DB_TABLE = "market_resolved"
     DB_COLUMNS = ["time","id","market","asset_ids","winning_asset_id","win_outcome"]
-    MAX_BATCH_SIZE = 10 
+    MAX_BATCH_SIZE = 100 
 
 class WebSocketHandler():
     
@@ -85,7 +85,11 @@ class WebSocketHandler():
         self.bidask = []
         self.new_market = []
         self.market_resolved = []
-        self.wsapp = websocket.WebSocketApp("wss://ws-subscriptions-clob.polymarket.com/ws/market", on_open=self.on_open, on_message=self.on_message)
+        self.wsapp = websocket.WebSocketApp("wss://ws-subscriptions-clob.polymarket.com/ws/market",
+                                            on_open=self.on_open,
+                                            on_message=self.on_message,
+                                            on_error=lambda *a: print("ERROR:", a[-1]),
+                                            on_close=lambda *a: print("CLOSE:", a))
 
     def schedule_rotation(self): # Updates initial subscription message to new market clobTokenID
         while True:
@@ -114,24 +118,25 @@ class WebSocketHandler():
                 print("Insert error", e)
                 self.conn.rollback()
 
-    def on_open(self, wsapp): # Initial request
+    def on_open(self, *_): # Initial request
+        print(self.current_ids)
         message = {
             "assets_ids": self.current_ids,
             "type": "market",
             "custom_feature_enabled": True,
         }
-        wsapp.send(json.dumps(message))
+        self.wsapp.send(json.dumps(message))
         threading.Thread(target=self.schedule_rotation, daemon=True).start()
 
         def ping():
             while True:
-                wsapp.send(json.dumps({}))
+                self.wsapp.send("PING")
                 time.sleep(10)
 
         threading.Thread(target=ping, daemon=True).start()
 
-    def on_message(self, wsapp, message):
-        message = json.loads(message)
+    def on_message(self, *args):
+        message = json.loads(args[-1])
         if message["event_type"] == "book":
             timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz = timezone.utc)
             rows = []
@@ -174,6 +179,7 @@ class WebSocketHandler():
                 self.last_trade_price = []
 
         elif message["event_type"] == "tick_size_change":
+            print("tick_size_change")
             timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz=timezone.utc)
             self.tick_delta.append((
                 timestamp,
@@ -231,6 +237,7 @@ class WebSocketHandler():
                 self.market_resolved = []
     
     def start(self):
+        websocket.enableTrace(True)
         self.wsapp.run_forever()
 
 if __name__ == "__main__":
