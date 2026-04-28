@@ -136,7 +136,14 @@ class WebSocketHandler():
         threading.Thread(target=ping, daemon=True).start()
 
     def on_message(self, *args):
-        message = json.loads(args[-1])
+        raw = args[-1]
+        if raw == "PONG":
+            return
+        payload = json.loads(raw)
+        for item in (payload if isinstance(payload, list) else [payload]):
+            self._dispatch(item)
+
+    def _dispatch(self, message):
         if message["event_type"] == "book":
             timestamp = datetime.fromtimestamp(int(message["timestamp"]) / 1000, tz = timezone.utc)
             rows = []
@@ -237,7 +244,6 @@ class WebSocketHandler():
                 self.market_resolved = []
     
     def start(self):
-        websocket.enableTrace(True)
         self.wsapp.run_forever()
 
 if __name__ == "__main__":
