@@ -1,6 +1,8 @@
-**.DS_Store
+.DS_Store
+**/.DS_Store
 *.key
 .env
 __pycache__/
 *.pyc
 kalshi/kalshi.txt
+hyperliquid/hyperliquid-python-sdk
